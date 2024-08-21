@@ -68,8 +68,9 @@ def make_test_suite(model, function_name, malloc_vars, num_tests=10, stateful=Fa
     s = '#include <stdio.h> \n'
     s += '#include <math.h> \n'
     s += '#include <time.h> \n'
-    s += '#include "./include/k2c_include.h" \n'
+    s += '#include "k2c_include.h" \n'
     s += '#include "' + function_name + '.h" \n\n'
+    s += '#include "xiltimer.h";\n'
     s += 'float maxabs(k2c_tensor *tensor1, k2c_tensor *tensor2);\n'
     s += 'struct timeval GetTimeStamp(); \n \n'
     file.write(s)
@@ -111,6 +112,7 @@ def make_test_suite(model, function_name, malloc_vars, num_tests=10, stateful=Fa
     file.write(s)
     
     s = ' float errors[' + str(num_tests*num_outputs) + '];\n'
+    s += ' float times[' + str(num_tests*num_outputs) + '];\n'
     s += ' size_t num_tests = ' + str(num_tests) + '; \n'
     s += 'size_t num_outputs = ' + str(num_outputs) + '; \n'
     for var in malloc_vars:
@@ -122,13 +124,15 @@ def make_test_suite(model, function_name, malloc_vars, num_tests=10, stateful=Fa
     if stateful:
         reset_sig = function_name + '_reset_states();'
         s += reset_sig
-    s += 'clock_t t0 = clock(); \n'
+    #s += 'clock_t t0 = clock(); \n'
     file.write(s)
-
+    s = 'XTime time1;\nXTime time2;\ndouble total_time;\n'
+    file.write(s)
     for i in range(num_tests):
+        s = 'XTime_GetTime(&time1);\n'
         if i == num_tests//2 and stateful:
             file.write(reset_sig)
-        s = function_name + '('
+        s += function_name + '('
         model_in = ['&test' + str(i+1) + '_' + inp +
                     '_input' for inp in model_inputs]
         model_out = ['&c_' + outp + '_test' +
@@ -136,11 +140,21 @@ def make_test_suite(model, function_name, malloc_vars, num_tests=10, stateful=Fa
         s += ','.join(model_in + model_out + list(malloc_vars))
         s += '); \n'
         file.write(s)
+        s = 'XTime_GetTime(&time2);\n'
+        file.write(s)
+        s = 'total_time = (double)(time2 - time1)/(double)(COUNTS_PER_SECOND);\n'
+        s += f'times[{i}] = total_time;\n'
+        file.write(s)
     file.write('\n')
-    s = 'clock_t t1 = clock(); \n'
-    s += 'printf("Average time over ' + str(num_tests) + \
-        ' tests: %e s \\n\", \n ((double)t1-t0)/(double)CLOCKS_PER_SEC/(double)' + \
-        str(num_tests) + '); \n'
+    #s = 'clock_t t1 = clock(); \n'
+    #s += 'printf("Average time over ' + str(num_tests) + \
+    #    ' tests: %e s \\n\", \n ((double)t1-t0)/(double)CLOCKS_PER_SEC/(double)' + \
+    #    str(num_tests) + '); \n'
+    s = "double sum = 0;\nint n = sizeof(times) / sizeof(times[0]);\n"
+    s += "for (int i = 0; i < n; i++){\n"
+    s += "  sum += times[i];\n}\n"
+    s += "double avg_time = sum / (double) n;\n"
+    s += 'printf("Average time over 100 tests: t=%15.15lf sec\\n",avg_time);\n'
     file.write(s)
 
     for i in range(num_tests):
